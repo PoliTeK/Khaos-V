@@ -3,7 +3,7 @@
     {
       "cStandard": "c11",
       "compilerPath": "arm-none-eabi-g++.exe",
-      "cppStandard": "c++20",
+      "cppStandard": "c++17",
       "defines": [
         "_DEBUG",
         "UNICODE",
@@ -19,7 +19,7 @@
     {
       "cStandard": "c11",
       "compilerPath": "/usr/local/bin/arm-none-eabi-g++",
-      "cppStandard": "c++20",
+      "cppStandard": "c++17",
       "defines": [
         "_DEBUG",
         "UNICODE",

@@ -1,0 +1,9 @@
+[[language]]
+name = "cpp"
+indent = { tab-width = 4, unit = "    " }
+formatter = { command = "clang-format" }
+language-servers = [ "clangd" ]
+
+[language-server.clangd]
+command = "clangd"
+args = ["--query-driver=**/arm-none-eabi-*", "--enable-config"]

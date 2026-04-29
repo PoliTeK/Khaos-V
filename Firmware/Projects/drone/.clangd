@@ -1,0 +1,23 @@
+CompileFlags:
+  Add:
+    - "-std=gnu++17"
+    - "-Wall"
+  Remove:
+    - "-fno-move-loop-invariants"
+  Compiler: arm-none-eabi-g++
+  BuiltinHeaders: QueryDriver
+
+Documentation:
+  CommentFormat: Doxygen
+
+Diagnostics:
+  UnusedIncludes: Strict
+  ClangTidy:
+    Add: [bugprone-*, cert-*, modernize-*, performance-*]
+    Remove: [bugprone-easily-swappable-parameters, modernize-use-trailing-return-type]
+
+InlayHints:
+  Enabled: true
+  ParameterNames: true
+  DeducedTypes: true
+  BlockEnd: true
