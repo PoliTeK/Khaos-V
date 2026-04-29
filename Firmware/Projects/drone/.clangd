@@ -7,9 +7,6 @@ CompileFlags:
   Compiler: arm-none-eabi-g++
   BuiltinHeaders: QueryDriver
 
-Documentation:
-  CommentFormat: Doxygen
-
 Diagnostics:
   UnusedIncludes: Strict
   ClangTidy:

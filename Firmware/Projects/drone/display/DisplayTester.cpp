@@ -26,7 +26,7 @@ int DisplayTester_main(void)
     char coords[2][12];
     dcblock.Init(1);
 
-    math::DiscretizedModel<math::Halvorsen> model;
+    math::DiscretizedModel<math::Halvorsen> model({}, 0.01);
     model.dt = 0.0025f;
     math::vec3f state = math::vec3f{1.0, 1.0, -1.0};
 
