@@ -1,17 +1,11 @@
 #pragma once
 
 #include <atomic>
-#include <optional>
 
 template <typename T> class TriBuf {
-private:
+public:
     enum class Permutation : uint8_t { P123, P132, P213, P231, P312, P321 };
 
-    T _data1, _data2, _data3;
-    std::atomic<Permutation> _perm{TriBuf::Permutation::P123};
-    std::atomic<bool> _has_writer{false}, _has_reader{false}, _middle_ready{false};
-
-public:
     class Writer {
         friend class TriBuf<T>;
 
@@ -29,13 +23,17 @@ public:
         }
 
         Writer& operator=(Writer that) {
-            std::swap(*this, that);
+            std::swap(this->_buf, that._buf);
             return *this;
         }
 
         ~Writer() {
             if (_buf)
                 _buf->_has_writer.store(false, std::memory_order_release);
+        }
+
+        operator bool() const {
+            return _buf != nullptr;
         }
 
         T &data() {
@@ -113,13 +111,17 @@ public:
         }
 
         Reader& operator=(Reader that) {
-            std::swap(*this, that);
+            std::swap(this->_buf, that._buf);
             return *this;
         }
 
         ~Reader() {
             if (_buf)
                 _buf->_has_reader.store(false, std::memory_order_release);
+        }
+
+        operator bool() const {
+            return _buf != nullptr;
         }
 
         const T &data() {
@@ -181,6 +183,12 @@ public:
         }
     };
 
+private:
+    T _data1, _data2, _data3;
+    std::atomic<Permutation> _perm{TriBuf::Permutation::P123};
+    std::atomic<bool> _has_writer{false}, _has_reader{false}, _middle_ready{false};
+
+public:
     TriBuf() : _data1(), _data2(), _data3() {}
 
     TriBuf(const T &data) : _data1(data), _data2(data), _data3(data) {}
@@ -188,7 +196,7 @@ public:
     TriBuf(const T &data_wr, const T &data_rd)
         : _data1(data_wr), _data2(), _data3(data_rd) {}
 
-    std::optional<Writer> get_writer() {
+    Writer get_writer() {
         bool expected = false;
         // success:
         //   - acquire data written by previous writers and permutation
@@ -204,7 +212,7 @@ public:
         }
     }
 
-    std::optional<Reader> get_reader() {
+    Reader get_reader() {
         bool expected = false;
         // success:
         //   - acquire data written by previous writers and permutation

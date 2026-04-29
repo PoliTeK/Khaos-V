@@ -3,7 +3,7 @@
 namespace digipot {
     using namespace daisy;
 
-    I2CHandle::Result init(daisy::I2CHandle &i2c) {
+    I2CHandle::Result init(I2CHandle &i2c) {
         I2CHandle::Config i2c_config;
 
         // choose which Daisy peripheral to use
@@ -34,7 +34,7 @@ namespace digipot {
         }
     }
 
-    I2CHandle::Result set_value(daisy::I2CHandle &i2c, Wiper wiper, uint16_t value) {
+    I2CHandle::Result set_value(I2CHandle &i2c, Wiper wiper, uint16_t value) {
         uint8_t wiper_addr = static_cast<uint8_t>(wiper);
 
         uint8_t data[2];

@@ -5,6 +5,7 @@
 // layout.
 // To prototype new code, use prototype/prototype.cpp
 
+#include <atomic>
 #include <daisy_seed.h>
 
 #include <array>
@@ -16,15 +17,20 @@
 #include "math/models.hpp"
 
 #include "hardware/digipot.hpp"
+#include "hardware/i2c_utils.hpp"
 
+#include "per/adc.h"
+#include "per/i2c.h"
 #include "sync/TriBuf.hpp"
 
 using namespace daisy;
 
 /* --- Configuration ---------------------------------------------------------------------------- */
-constexpr bool DEBUG = false;
+constexpr bool DEBUG = true;
+constexpr const char *LOG_LABEL = "[Khaos-V]";
+constexpr std::array<const char *, 2> LOG_RESULT{"Error", "Success"};
 
-constexpr uint32_t INPUT_SAMPLE_RATE = 100;   // per second
+constexpr uint32_t INPUT_SAMPLE_RATE = 1;     // per second
 constexpr uint32_t OUTPUT_SAMPLE_RATE = 100;  // per second
 constexpr uint32_t DISPLAY_REFRESH_RATE = 30; // per second
 
@@ -38,11 +44,16 @@ constexpr size_t PARAM_RESOLUTION = 1024;
 
 /* --- Definitions ------------------------------------------------------------------------------ */
 
-/** Contains all hardware handles related to inputs.
- *  It is safely shared between interrupt callbacks because it does not contain
- *  actual input data, as long as only one "process" updates it.
+struct KhaosInputData;
+
+/**
+ * Contains all hardware handles related to inputs.
+ * It is safely shared between interrupt callbacks because it does not contain
+ * actual input data, as long as only one "process" updates it.
  */
 struct KhaosInput {
+    std::atomic_bool pending_refresh{false};
+
     AdcHandle adc;
     std::array<Encoder, 4> encoders;
 
@@ -50,6 +61,7 @@ struct KhaosInput {
 
     /// @brief Initialize ADC channels and GPIOs
     void init();
+    void refresh(KhaosInputData &);
 };
 
 /** Contains all hardware handles related to outputs.
@@ -64,9 +76,10 @@ struct KhaosOutput {
     void init();
 };
 
-/** Input data coming from external hardware.
- *  This must be synchronized across interrupts and processed in order to be
- *  used to control chaotic models and other outputs.
+/**
+ * Input data coming from external hardware.
+ * This must be synchronized across interrupts and processed in order to be
+ * used to control chaotic models and other outputs.
  */
 struct KhaosInputData {
     std::array<uint16_t, 4> encoder_values;
@@ -82,8 +95,9 @@ struct KhaosModelData {
     math::Rossler rossler;
 };
 
-/// @brief Initializes timers, WITHOUT starting them or initializing callbacks.
+/// @brief Initializes timers
 void init_timers();
+
 void input_timer_callback(void *data);
 void output_dma_callback(uint16_t **out, size_t size);
 void display_refresh_callback(void *data);
@@ -101,13 +115,9 @@ TimerHandle display_timer;
 static KhaosInput input;
 static KhaosOutput output;
 
-static TriBuf<KhaosInputData> input_data;
-static TriBuf<KhaosInputData>::Writer input_data_writer; // owner: input_timer_callback
-static TriBuf<KhaosInputData>::Reader input_data_reader; // owner: main
-
 static TriBuf<KhaosModelData> model_data;
 static TriBuf<KhaosModelData>::Writer model_data_writer; // owner: main
-static TriBuf<KhaosModelData>::Reader model_data_reader; // owner output_dma_callback
+static TriBuf<KhaosModelData>::Reader model_data_reader; // owner: output_dma_callback
 
 static std::array<std::array<uint16_t, OUTPUT_BUFFER_SIZE>, 2> output_buf;
 
@@ -115,24 +125,42 @@ static std::array<std::array<uint16_t, OUTPUT_BUFFER_SIZE>, 2> output_buf;
 
 int main() {
     DaisySeed hw;
+
+    // Needed to maintain a persistent state, even if the reader loses some updates
+    KhaosInputData input_data;
+
     hw.Init();
     hw.StartLog(DEBUG);
+    hw.PrintLine("%s Starting initialization...", LOG_LABEL);
 
     // no one has access to these yet
     // we must ensure that at most one "process" (i.e. interrupt callback)
     // has access to one of these at any time
-    input_data_writer = input_data.get_writer().value();
-    input_data_reader = input_data.get_reader().value();
-    model_data_writer = model_data.get_writer().value();
-    model_data_reader = model_data.get_reader().value();
+    model_data_writer = model_data.get_writer();
+    model_data_reader = model_data.get_reader();
 
-    input.init();
-    output.init();
+    hw.PrintLine("%s Acquired TriBuf handles", LOG_LABEL);
+
+    // input.init();
+    // output.init();
     init_timers();
 
-    I2CHandle digipot_i2c;
-    if (digipot::init(digipot_i2c) != I2CHandle::Result::OK) {
-        hw.PrintLine("[Khaos-V] Could not find the I2C digipot");
+    hw.PrintLine("%s Successfully initialized peripherals", LOG_LABEL);
+
+    I2CHandle i2c_handle;
+    hw.Print("%s Init I2C Port 1: ", LOG_LABEL);
+    if (digipot::init(i2c_handle) == daisy::I2CHandle::Result::OK) {
+        hw.PrintLine("%s", LOG_RESULT[1]);
+    } else {
+        hw.PrintLine("%s", LOG_RESULT[0]);
+        goto bad_init;
+    }
+
+    hw.Print("%s Check digipots: ", LOG_LABEL);
+    if (i2c_check_addr(i2c_handle, digipot::I2C_ADDRESS) == I2CHandle::Result::OK) {
+        hw.PrintLine("%s", LOG_RESULT[1]);
+    } else {
+        hw.PrintLine("%s", LOG_RESULT[0]);
         goto bad_init;
     }
 
@@ -142,19 +170,20 @@ int main() {
     // - output digital oscillator
     // - manage display
 
-    hw.PrintLine("[Khaos-V] System initialized successfully");
+    hw.PrintLine("%s System initialized successfully", LOG_LABEL);
 
     while (true) {
+        bool expected_pending = true;
+
         // Process input data if new data is available
-        if (input_data_reader.try_swap()) {
-            auto &in_data = input_data_reader.data();
-            auto &m_data = model_data_writer.data();
+        if (input.pending_refresh.compare_exchange_strong(expected_pending, false, std::memory_order_relaxed)) {
+            input.refresh(input_data);
 
             std::array<uint16_t, 2> params;
 
             for (size_t i = 0; i < 2; i++) {
-                int32_t raw_value = static_cast<int32_t>(in_data.cvs[i]) +
-                                    static_cast<int32_t>(in_data.encoder_values[i]);
+                int32_t raw_value = static_cast<int32_t>(input_data.cvs[i]) +
+                                    static_cast<int32_t>(input_data.encoder_values[i]);
 
                 constexpr uint16_t max_value = std::numeric_limits<uint16_t>::max();
 
@@ -163,19 +192,19 @@ int main() {
 
             // TODO: map params to model-specific (float) parameters
             // m_data.remap_params(...);
-            model_data_writer.swap();
+            // model_data_writer.swap();
         }
-
-        __WFE(); // wait for event (low power mode)
     }
 
 bad_init:
     hw.SetLed(true);
-    hw.PrintLine("[Khaos-V] Something went wrong during the initialization");
+    hw.PrintLine("%s Something went wrong during the initialization", LOG_LABEL);
 
-    output.dac.Stop();
-    display_timer.DeInit();
-    input_timer.DeInit();
+    // output.dac.Stop();
+    // display_timer.DeInit();
+    // input_timer.DeInit();
+
+    hw.PrintLine("%s System shut down", LOG_LABEL);
     hw.DeInit();
 
     while (true) {
@@ -200,6 +229,39 @@ void KhaosInput::init() {
 
     // selezione modello: quale digitale?
     encoders[3].Init(seed::D13, seed::D14, seed::D27);
+}
+
+void KhaosInput::refresh(KhaosInputData &data) {
+    /* Encoders */
+    for (size_t i = 0; i < input.encoders.size(); i++) {
+        input.encoders[i].Debounce();
+        int32_t increment = input.encoders[i].Increment();
+
+        int32_t new_value =
+            static_cast<int32_t>(data.encoder_values[i]) +
+            increment * static_cast<int32_t>(PARAM_RESOLUTION / ROTARY_ENCODER_RESOLUTION);
+
+        constexpr uint16_t max_value = std::numeric_limits<uint16_t>::max();
+
+        // Clamp encoder value between 0 and (2^16 - 1)
+        if (new_value < 0) {
+            data.encoder_values[i] = 0;
+        } else if (new_value > static_cast<int>(max_value)) {
+            data.encoder_values[i] = max_value;
+        } else {
+            data.encoder_values[i] = static_cast<uint16_t>(new_value);
+        }
+
+        // Gather switch data
+        // TODO: change to FallingEdge; do not save switch data directly,
+        // (falling edges may be lost due to how TripleBuffer works),
+        // but rather select here which chaotic model to use
+        data.switches[i] = input.encoders[i].Pressed();
+    }
+
+    /* Control Voltages */
+    data.cvs[0] = input.adc.Get(KhaosInput::ADC_CV0);
+    data.cvs[1] = input.adc.Get(KhaosInput::ADC_CV1);
 }
 
 void KhaosOutput::init() {
@@ -246,6 +308,7 @@ void init_timers() {
     input_timer.SetCallback(input_timer_callback);
     input_timer.SetPrescaler(3999); // avoids overflow since the timer is 16-bit
     input_timer.SetPeriod(input_timer.GetFreq() / INPUT_SAMPLE_RATE);
+    input_timer.Start();
 
     /* Output management timer */
     config.dir = TimerHandle::Config::CounterDir::UP;
@@ -255,52 +318,11 @@ void init_timers() {
     display_timer.SetCallback(display_refresh_callback);
     display_timer.SetPrescaler(3999); // avoids overflow since the timer is 16-bit
     display_timer.SetPeriod(input_timer.GetFreq() / DISPLAY_REFRESH_RATE);
-
-    input_timer.SetCallback(input_timer_callback);
-    input_timer.Start();
-
-    display_timer.SetCallback(display_refresh_callback);
     display_timer.Start();
 }
 
 void input_timer_callback(void *data) {
-    // Needed to maintain a persistent state, even if the reader loses some updates
-    static KhaosInputData local_data;
-
-    /* Encoders */
-    for (size_t i = 0; i < input.encoders.size(); i++) {
-        input.encoders[i].Debounce();
-        int32_t increment = input.encoders[i].Increment();
-
-        int32_t new_value =
-            static_cast<int32_t>(local_data.encoder_values[i]) +
-            increment * static_cast<int32_t>(PARAM_RESOLUTION / ROTARY_ENCODER_RESOLUTION);
-
-        constexpr uint16_t max_value = std::numeric_limits<uint16_t>::max();
-
-        // Clamp encoder value between 0 and (2^16 - 1)
-        if (new_value < 0) {
-            local_data.encoder_values[i] = 0;
-        } else if (new_value > static_cast<int>(max_value)) {
-            local_data.encoder_values[i] = max_value;
-        } else {
-            local_data.encoder_values[i] = static_cast<uint16_t>(new_value);
-        }
-
-        // Gather switch data
-        // TODO: change to FallingEdge; do not save switch data directly,
-        // (falling edges may be lost due to how TripleBuffer works),
-        // but rather select here which chaotic model to use
-        local_data.switches[i] = input.encoders[i].Pressed();
-    }
-
-    /* Control Voltages */
-    local_data.cvs[0] = input.adc.Get(KhaosInput::ADC_CV0);
-    local_data.cvs[1] = input.adc.Get(KhaosInput::ADC_CV1);
-
-    // Synchronize data
-    input_data_writer.data() = local_data;
-    input_data_writer.swap();
+    input.pending_refresh.store(true, std::memory_order_relaxed);
 }
 
 void output_dma_callback(uint16_t **out, size_t size) {

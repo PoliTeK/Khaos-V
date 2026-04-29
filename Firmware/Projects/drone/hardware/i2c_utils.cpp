@@ -13,7 +13,7 @@ void i2c_scan(daisy::DaisySeed &hw, daisy::I2CHandle &i2c) {
     }
 }
 
-inline daisy::I2CHandle::Result i2c_check_addr(daisy::I2CHandle &i2c_handle, uint8_t addr)
+daisy::I2CHandle::Result i2c_check_addr(daisy::I2CHandle &i2c_handle, uint8_t addr)
 {
 	// provo a fare una trasmissione vuota
 	// nota: il timeout è in ms
