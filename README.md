@@ -10,6 +10,9 @@
 
 ---
 
+> ## 🚧 Work In Progress
+> This project is currently under active development.
+
 Khaos-V is an experimental Eurorack module designed to explore the generation of chaotic control voltages using nonlinear mathematical models. Based on the “jerk” dynamical system, this fully analog prototype produces three distinct CV signals (x, y, z), exhibiting unpredictable yet deterministic behavior.
 
 Two main controls allow interaction with the system dynamics: shape, which alters the structure of the chaotic attractor, and intensity, which adjusts its energy and voltage range. The three outputs enable simultaneous modulation of multiple parameters, introducing complex and organic variations.
