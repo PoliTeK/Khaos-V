@@ -1,6 +1,6 @@
 <h1 align="center">
 	<br>
-		<img src="Images/khaos_render.png" width="600">
+		<img src="Images/khaos_render.png" height="500">
 	<br>
 		Khaos-V
 	<br>
