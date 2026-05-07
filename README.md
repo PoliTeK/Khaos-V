@@ -6,7 +6,7 @@
 	<br>
 </h1>
 
-<h4 align="center">Chaotic drone Eurorack module from PoliTeK.</h4>
+<h4 align="center">Chaotic CV Eurorack module from PoliTeK.</h4>
 
 ---
 
