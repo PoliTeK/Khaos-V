@@ -16,18 +16,21 @@ math::vec3f states[NUM_MODELS];
 daisy::TimerHandle timer;
 
 // Call from prototype.cpp/main() if needed
-int DisplayTester_main(void)
+int main(void)
 {
-    uint8_t out[2];
+    char coords[2][12];
+
     hw.Configure();
     hw.Init();
 
     display.InitDisplay();
-    char coords[2][12];
-    dcblock.Init(1);
 
-    math::DiscretizedModel<math::Halvorsen> model({}, 0.01);
-    model.dt = 0.0025f;
+    display.setCurrentModel(Displayed_Models::ROSSLER); // Change this variable for model selection in the list
+    
+    dcblock.Init(1);
+    
+    math::DiscretizedModel<math::Rossler> model({}, 0.01); // Change the object model here for model selection in the graph
+    model.dt = 0.05f; // Speed of the model
     math::vec3f state = math::vec3f{1.0, 1.0, -1.0};
 
     TimerHandle::Config config;
@@ -40,27 +43,18 @@ int DisplayTester_main(void)
     while(1)
     {
         display.ClearDisplay();
-        display.WriteText(0,"Lorentz");
-        display.WriteText(1,"Rossler");
-        display.WriteText(2,"Halvorsen");
-        display.SelectText(2);
 
         for (int i = 0; i < 20; i++) {
             state = model.step(state);
 
-            out[0] = state.x() * 2 + 32;
-            out[1] = state.y() * 2 + 32;
-
-            display.DrawPoint(out[0], out[1]);
+            display.DrawPoint(state);
         }
 
         sprintf(coords[0], FLT_FMT(3), FLT_VAR(3,state.x()));
         sprintf(coords[1], FLT_FMT(3), FLT_VAR(3,state.y()));
 
-        display.WriteText(4, coords[0]);
-        display.WriteText(5, coords[1]);
         display.UpdateDisplay();
 
-        hw.DelayMs(1000/20);
+        hw.DelayMs(1000/60);
     }
 }
