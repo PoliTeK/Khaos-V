@@ -1,8 +1,7 @@
 /* Khaos-V */
 /* PoliTeK 2026*/
 
-// This file contains code specialized for the final revision of the project
-// layout.
+// This file contains code specialized for the final revision of the project layout.
 // To prototype new code, use prototype/prototype.cpp
 
 #include <atomic>
@@ -19,8 +18,6 @@
 #include "hardware/digipot.hpp"
 #include "hardware/i2c_utils.hpp"
 
-#include "per/adc.h"
-#include "per/i2c.h"
 #include "sync/TriBuf.hpp"
 
 using namespace daisy;
@@ -28,14 +25,21 @@ using namespace daisy;
 /* --- Configuration ---------------------------------------------------------------------------- */
 constexpr bool DEBUG = true;
 constexpr const char *LOG_LABEL = "[Khaos-V]";
-constexpr std::array<const char *, 2> LOG_RESULT{"Error", "Success"};
+constexpr const char *LOG_ERROR = "Error";
+constexpr const char *LOG_OK    = "Success";
 
-constexpr uint32_t INPUT_SAMPLE_RATE = 1;     // per second
-constexpr uint32_t OUTPUT_SAMPLE_RATE = 100;  // per second
+constexpr uint32_t INPUT_SAMPLE_RATE = 1; // per second
+
+/// Number of samples stored in the output buffer.
+constexpr size_t OUTPUT_BUFFER_SIZE = 32;
+/// DAC output target sample rate.
+constexpr uint32_t OUTPUT_SAMPLE_RATE = 1000; // per second
+
+// NOTE: the audio callback is called roughly OUTPUT_SAMPLE_RATE/OUTBUT_BUFFER_SIZE times per second,
+// meaning that if this value is too small there will be a noticeable latency from inputs to outputs.
+
+/// Refresh rate of the screen.
 constexpr uint32_t DISPLAY_REFRESH_RATE = 30; // per second
-
-/// Number of samples stored in the output buffer
-constexpr size_t OUTPUT_BUFFER_SIZE = 128;
 
 /// @brief Sets how many 'ticks' cover the full range.
 /// Controls the resolution for encoder-controlled parameters.
@@ -48,8 +52,6 @@ struct KhaosInputData;
 
 /**
  * Contains all hardware handles related to inputs.
- * It is safely shared between interrupt callbacks because it does not contain
- * actual input data, as long as only one "process" updates it.
  */
 struct KhaosInput {
     std::atomic_bool pending_refresh{false};
@@ -62,11 +64,11 @@ struct KhaosInput {
     /// @brief Initialize ADC channels and GPIOs
     void init();
     void refresh(KhaosInputData &);
+    void process(const KhaosInputData &);
 };
 
-/** Contains all hardware handles related to outputs.
- *  It is safely shared between interrupt callbacks because it does not contain
- *  actual output data.
+/**
+ * Contains all hardware handles related to outputs.
  */
 struct KhaosOutput {
     DacHandle dac;
@@ -83,9 +85,15 @@ struct KhaosOutput {
  */
 struct KhaosInputData {
     std::array<uint16_t, 4> encoder_values;
-    std::array<bool, 4> switches;
-    std::array<uint16_t, 2> cvs;
 
+    /// Counters for how many times each switch was pressed.
+    /// Using a counter is needed to avoid losing updates accidentally.
+    std::array<uint32_t, 4> switches{0};
+
+    /// Control Voltages
+    std::array<uint16_t, 2> cvs{0};
+
+    /// @brief Initialize input data with default values
     KhaosInputData();
 };
 
@@ -93,6 +101,10 @@ struct KhaosInputData {
 struct KhaosModelData {
     enum SelectedModel { ROSSLER = 0, NUM_MODELS } selected;
     math::Rossler rossler;
+    math::Halvorsen halvorsen;
+
+    /// @brief Initialize chaotic models with default parameters
+    KhaosModelData() = default;
 };
 
 /// @brief Initializes timers
@@ -101,9 +113,6 @@ void init_timers();
 void input_timer_callback(void *data);
 void output_dma_callback(uint16_t **out, size_t size);
 void display_refresh_callback(void *data);
-
-// /// @brief Initialized chaotic models with default parameters
-// void init_chaotic_models();
 
 /* --- Global variables ------------------------------------------------------------------------- */
 
@@ -120,6 +129,8 @@ static TriBuf<KhaosModelData>::Writer model_data_writer; // owner: main
 static TriBuf<KhaosModelData>::Reader model_data_reader; // owner: output_dma_callback
 
 static std::array<std::array<uint16_t, OUTPUT_BUFFER_SIZE>, 2> output_buf;
+
+static std::atomic_bool display_pending_refresh{false};
 
 /* --- Main code -------------------------------------------------------------------------------- */
 
@@ -141,8 +152,8 @@ int main() {
 
     hw.PrintLine("%s Acquired TriBuf handles", LOG_LABEL);
 
-    // input.init();
-    // output.init();
+    input.init();
+    output.init();
     init_timers();
 
     hw.PrintLine("%s Successfully initialized peripherals", LOG_LABEL);
@@ -150,17 +161,17 @@ int main() {
     I2CHandle i2c_handle;
     hw.Print("%s Init I2C Port 1: ", LOG_LABEL);
     if (digipot::init(i2c_handle) == daisy::I2CHandle::Result::OK) {
-        hw.PrintLine("%s", LOG_RESULT[1]);
+        hw.PrintLine("%s", LOG_OK);
     } else {
-        hw.PrintLine("%s", LOG_RESULT[0]);
+        hw.PrintLine("%s", LOG_ERROR);
         goto bad_init;
     }
 
     hw.Print("%s Check digipots: ", LOG_LABEL);
     if (i2c_check_addr(i2c_handle, digipot::I2C_ADDRESS) == I2CHandle::Result::OK) {
-        hw.PrintLine("%s", LOG_RESULT[1]);
+        hw.PrintLine("%s", LOG_OK);
     } else {
-        hw.PrintLine("%s", LOG_RESULT[0]);
+        hw.PrintLine("%s", LOG_ERROR);
         goto bad_init;
     }
 
@@ -173,36 +184,26 @@ int main() {
     hw.PrintLine("%s System initialized successfully", LOG_LABEL);
 
     while (true) {
-        bool expected_pending = true;
-
         // Process input data if new data is available
-        if (input.pending_refresh.compare_exchange_strong(expected_pending, false, std::memory_order_relaxed)) {
+        if (input.pending_refresh.exchange(false, std::memory_order_acquire)) {
             input.refresh(input_data);
-
-            std::array<uint16_t, 2> params;
-
-            for (size_t i = 0; i < 2; i++) {
-                int32_t raw_value = static_cast<int32_t>(input_data.cvs[i]) +
-                                    static_cast<int32_t>(input_data.encoder_values[i]);
-
-                constexpr uint16_t max_value = std::numeric_limits<uint16_t>::max();
-
-                params[i] = static_cast<uint16_t>(math::clamp<int32_t>(raw_value, 0, max_value));
-            }
-
-            // TODO: map params to model-specific (float) parameters
-            // m_data.remap_params(...);
-            // model_data_writer.swap();
+            input.process(input_data);
         }
+
+        if (display_pending_refresh.exchange(false, std::memory_order_acquire)) {
+            // TODO: manage display stuff...
+        }
+
+        __WFE(); // low powah
     }
 
 bad_init:
     hw.SetLed(true);
     hw.PrintLine("%s Something went wrong during the initialization", LOG_LABEL);
 
-    // output.dac.Stop();
-    // display_timer.DeInit();
-    // input_timer.DeInit();
+    output.dac.Stop();
+    display_timer.DeInit();
+    input_timer.DeInit();
 
     hw.PrintLine("%s System shut down", LOG_LABEL);
     hw.DeInit();
@@ -224,10 +225,10 @@ void KhaosInput::init() {
     encoders[0].Init(seed::D17, seed::D18, seed::D24); // input 1
     encoders[1].Init(seed::D19, seed::D20, seed::D25); // input 2
 
-    // selezione modello: analog1, analog2 o digital
+    // Model selection: analog1, analog2 or digital
     encoders[2].Init(seed::D2, seed::D3, seed::D26);
 
-    // selezione modello: quale digitale?
+    // Digital model selection
     encoders[3].Init(seed::D13, seed::D14, seed::D27);
 }
 
@@ -246,22 +247,38 @@ void KhaosInput::refresh(KhaosInputData &data) {
         // Clamp encoder value between 0 and (2^16 - 1)
         if (new_value < 0) {
             data.encoder_values[i] = 0;
-        } else if (new_value > static_cast<int>(max_value)) {
+        } else if (new_value > static_cast<int32_t>(max_value)) {
             data.encoder_values[i] = max_value;
         } else {
             data.encoder_values[i] = static_cast<uint16_t>(new_value);
         }
 
-        // Gather switch data
-        // TODO: change to FallingEdge; do not save switch data directly,
-        // (falling edges may be lost due to how TripleBuffer works),
-        // but rather select here which chaotic model to use
-        data.switches[i] = input.encoders[i].Pressed();
+        // Gather switch data (switch is set on falling edge)
+        // Increment on falling edge
+        data.switches[i] += input.encoders[i].FallingEdge() ? 1 : 0;
     }
 
     /* Control Voltages */
     data.cvs[0] = input.adc.Get(KhaosInput::ADC_CV0);
     data.cvs[1] = input.adc.Get(KhaosInput::ADC_CV1);
+}
+
+// TODO: move out of KhaosInput?
+void KhaosInput::process(const KhaosInputData &input_data) {
+    std::array<uint16_t, 2> params;
+
+    for (size_t i = 0; i < 2; i++) {
+        int32_t raw_value = static_cast<int32_t>(input_data.cvs[i]) +
+                            static_cast<int32_t>(input_data.encoder_values[i]);
+
+        constexpr uint16_t max_value = std::numeric_limits<uint16_t>::max();
+
+        params[i] = static_cast<uint16_t>(math::clamp<int32_t>(raw_value, 0, max_value));
+    }
+
+    // TODO: map params to model-specific (float) parameters
+    // m_data.remap_params(...);
+    // model_data_writer.swap();
 }
 
 void KhaosOutput::init() {
@@ -317,12 +334,12 @@ void init_timers() {
     display_timer.Init(config);
     display_timer.SetCallback(display_refresh_callback);
     display_timer.SetPrescaler(3999); // avoids overflow since the timer is 16-bit
-    display_timer.SetPeriod(input_timer.GetFreq() / DISPLAY_REFRESH_RATE);
+    display_timer.SetPeriod(display_timer.GetFreq() / DISPLAY_REFRESH_RATE);
     display_timer.Start();
 }
 
 void input_timer_callback(void *data) {
-    input.pending_refresh.store(true, std::memory_order_relaxed);
+    input.pending_refresh.store(true, std::memory_order_release);
 }
 
 void output_dma_callback(uint16_t **out, size_t size) {
@@ -348,4 +365,5 @@ void output_dma_callback(uint16_t **out, size_t size) {
 
 void display_refresh_callback(void *data) {
     // TODO: ...
+    display_pending_refresh.store(true, std::memory_order_release);
 }

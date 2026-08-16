@@ -1,4 +1,4 @@
-/Users/federicolessio/Desktop/poli/Khaos-V/Firmware/Projects/drone/display/Display.cpp#include "daisy_seed.h"
+#include "daisy_seed.h"
 #include "daisysp.h"
 #include "Display.hpp"
 #include "../math/models.hpp"
