@@ -39,7 +39,7 @@ template <class T> class DiscreteModel {
      * @brief Advances the system by one iteration.
      * @return the next state after one iteration
      */
-    virtual T step(T state) const = 0;
+    [[nodiscard]] virtual T step(T state) const = 0;
 
     T step(T state, size_t iterations) {
         for (size_t i = 0; i < iterations; i++) {
@@ -71,12 +71,12 @@ template <class T> class ContinuousModel {
      * To compute the trajectory of the system, this gradient has to be
      * integrated (e.g. using RK4 or explicit Euler).
      */
-    virtual T gradient(T state) const = 0;
+    [[nodiscard]] virtual T gradient(T state) const = 0;
 
     /**
      * @brief Integrates `gradient()` using Runge-Kutta 4 by default
      */
-    virtual T step(T state, Time dt) const {
+    [[nodiscard]] virtual T step(T state, Time dt) const {
         auto grad = [this](T state) { return this->gradient(state); };
 
         return rk4<T::size()>(state, grad, dt);
@@ -108,7 +108,7 @@ class Henon : public DiscreteModel<vec2f> {
     float a = 1.14;
     float b = 0.3;
 
-    vec2f step(vec2f state) const override;
+    [[nodiscard]] vec2f step(vec2f state) const override;
 };
 
 class Ikeda : public DiscreteModel<vec2f> {
@@ -117,7 +117,7 @@ class Ikeda : public DiscreteModel<vec2f> {
     float k = 0.4;
     float p = 6.0;
 
-    vec2f step(vec2f) const override;
+    [[nodiscard]] vec2f step(vec2f) const override;
 };
 
 // -- Continuous oscillators --
@@ -130,29 +130,29 @@ class Chua : public ContinuousModel<vec3f> {
   public:
     float alpha = 18.39f, beta = 39.0f, m0 = -1.143, m1 = -0.714;
 
-    float chua_diode(float x) const;
-    vec3f gradient(vec3f state) const override;
+    [[nodiscard]] float chua_diode(float x) const;
+    [[nodiscard]] vec3f gradient(vec3f state) const override;
 };
 
 class Sprott : public ContinuousModel<vec3f> {
   public:
     float a = 2.07, b = 1.79;
 
-    vec3f gradient(vec3f) const override;
+    [[nodiscard]] vec3f gradient(vec3f) const override;
 };
 
 class Rossler : public ContinuousModel<vec3f> {
   public:
     float a = 0.2, b = 0.2, c = 5.7;
 
-    vec3f gradient(vec3f) const override;
+    [[nodiscard]] vec3f gradient(vec3f) const override;
 };
 
 class Halvorsen : public ContinuousModel<vec3f> {
   public:
     float a = 1.89;
 
-    vec3f gradient(vec3f) const override;
+    [[nodiscard]] vec3f gradient(vec3f) const override;
 };
 
 class Lorentz : public ContinuousModel<vec3f> {
@@ -161,6 +161,6 @@ class Lorentz : public ContinuousModel<vec3f> {
     float sigma = 10;
     float beta = 8.f / 3.f;
 
-    vec3f gradient(vec3f) const override;
+    [[nodiscard]] vec3f gradient(vec3f) const override;
 };
-} // namespace math
+}

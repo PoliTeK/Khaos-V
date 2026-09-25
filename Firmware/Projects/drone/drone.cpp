@@ -63,8 +63,7 @@ struct KhaosInput {
 
     /// @brief Initialize ADC channels and GPIOs
     void init();
-    void refresh(KhaosInputData &);
-    void process(const KhaosInputData &);
+    KhaosInputData refresh(const KhaosInputData &);
 };
 
 /**
@@ -98,10 +97,13 @@ struct KhaosInputData {
 };
 
 // TODO: choose models
+// TODO: choose a more appropriate name
 struct KhaosModelData {
     enum SelectedModel { ROSSLER = 0, NUM_MODELS } selected;
     math::Rossler rossler;
     math::Halvorsen halvorsen;
+
+    decltype(KhaosInputData::switches) switches;
 
     /// @brief Initialize chaotic models with default parameters
     KhaosModelData() = default;
@@ -114,6 +116,10 @@ void input_timer_callback(void *data);
 void output_dma_callback(uint16_t **out, size_t size);
 void display_refresh_callback(void *data);
 
+/// Reads new input and processes it.
+/// It must be called exclusively by main(), and thus it has access to its resources.
+void handle_input();
+
 /* --- Global variables ------------------------------------------------------------------------- */
 
 /// TIM3: 16-bit timer
@@ -124,7 +130,7 @@ TimerHandle display_timer;
 static KhaosInput input;
 static KhaosOutput output;
 
-static TriBuf<KhaosModelData> model_data;
+static TriBuf<KhaosModelData> model_data_sync;
 static TriBuf<KhaosModelData>::Writer model_data_writer; // owner: main
 static TriBuf<KhaosModelData>::Reader model_data_reader; // owner: output_dma_callback
 
@@ -137,20 +143,18 @@ static std::atomic_bool display_pending_refresh{false};
 int main() {
     DaisySeed hw;
 
-    // Needed to maintain a persistent state, even if the reader loses some updates
-    KhaosInputData input_data;
-
     hw.Init();
     hw.StartLog(DEBUG);
     hw.PrintLine("%s Starting initialization...", LOG_LABEL);
 
-    // no one has access to these yet
-    // we must ensure that at most one "process" (i.e. interrupt callback)
-    // has access to one of these at any time
-    model_data_writer = model_data.get_writer();
-    model_data_reader = model_data.get_reader();
+    // get_writer() and get_reader() can be called without issue because
+    // no one has access to these yet.
+    // We must ensure that at most one "process" (i.e. main / interrupt callback)
+    // has access to each of them at any time.
+    model_data_writer = model_data_sync.get_writer();
+    model_data_reader = model_data_sync.get_reader();
 
-    hw.PrintLine("%s Acquired TriBuf handles", LOG_LABEL);
+    hw.PrintLine("%s Acquired model data handles", LOG_LABEL);
 
     input.init();
     output.init();
@@ -186,8 +190,7 @@ int main() {
     while (true) {
         // Process input data if new data is available
         if (input.pending_refresh.exchange(false, std::memory_order_acquire)) {
-            input.refresh(input_data);
-            input.process(input_data);
+            handle_input();
         }
 
         if (display_pending_refresh.exchange(false, std::memory_order_acquire)) {
@@ -232,7 +235,9 @@ void KhaosInput::init() {
     encoders[3].Init(seed::D13, seed::D14, seed::D27);
 }
 
-void KhaosInput::refresh(KhaosInputData &data) {
+KhaosInputData KhaosInput::refresh(const KhaosInputData &prev_data) {
+    auto data = prev_data;
+
     /* Encoders */
     for (size_t i = 0; i < input.encoders.size(); i++) {
         input.encoders[i].Debounce();
@@ -261,24 +266,32 @@ void KhaosInput::refresh(KhaosInputData &data) {
     /* Control Voltages */
     data.cvs[0] = input.adc.Get(KhaosInput::ADC_CV0);
     data.cvs[1] = input.adc.Get(KhaosInput::ADC_CV1);
+
+    return data;
 }
 
-// TODO: move out of KhaosInput?
-void KhaosInput::process(const KhaosInputData &input_data) {
+void handle_input() {
+    // Needed to maintain a persistent state, even if the reader loses some updates
+    static KhaosInputData input_data;
+
+    input_data = input.refresh(input_data);    
+
+    auto& model_data = model_data_writer.data();
+
     std::array<uint16_t, 2> params;
 
-    for (size_t i = 0; i < 2; i++) {
-        int32_t raw_value = static_cast<int32_t>(input_data.cvs[i]) +
-                            static_cast<int32_t>(input_data.encoder_values[i]);
-
+    for (size_t i = 0; i < params.size(); i++) {
+        int32_t raw_value = static_cast<int32_t>(input_data.cvs[i]) + static_cast<int32_t>(input_data.encoder_values[i]);
         constexpr uint16_t max_value = std::numeric_limits<uint16_t>::max();
 
         params[i] = static_cast<uint16_t>(math::clamp<int32_t>(raw_value, 0, max_value));
     }
 
+    model_data.switches = input_data.switches;
+
     // TODO: map params to model-specific (float) parameters
     // m_data.remap_params(...);
-    // model_data_writer.swap();
+    model_data_writer.swap();
 }
 
 void KhaosOutput::init() {
