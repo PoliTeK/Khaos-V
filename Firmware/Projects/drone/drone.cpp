@@ -179,6 +179,8 @@ int main() {
         goto bad_init;
     }
 
+    // TODO: init display
+
     // Tasks:
     // - read input
     // - propagate parameters to chaotic oscillators
@@ -281,9 +283,11 @@ void handle_input() {
     std::array<uint16_t, 2> params;
 
     for (size_t i = 0; i < params.size(); i++) {
+        // sum CV and encoder value
         int32_t raw_value = static_cast<int32_t>(input_data.cvs[i]) + static_cast<int32_t>(input_data.encoder_values[i]);
         constexpr uint16_t max_value = std::numeric_limits<uint16_t>::max();
 
+        // clamp to 16 bit unsigned int
         params[i] = static_cast<uint16_t>(math::clamp<int32_t>(raw_value, 0, max_value));
     }
 
@@ -358,6 +362,7 @@ void input_timer_callback(void *data) {
 void output_dma_callback(uint16_t **out, size_t size) {
     static ChaosOsc<math::Rossler> rossler(math::Rossler{}, math::vec3f{1.0f, 1.0f, 1.0f},
                                            static_cast<float>(OUTPUT_SAMPLE_RATE), 1.0f);
+    // static ChaosOsc<math::Halvorsen> 
     // TODO: other models...
 
     // Use new data to change model parameters
@@ -371,6 +376,7 @@ void output_dma_callback(uint16_t **out, size_t size) {
     // TODO: remap model values; choose which model; etc...
     for (size_t i = 0; i < size; i++) {
         math::vec3f state = rossler.step();
+
         out[0][i] = state.x();
         out[1][i] = state.y();
     }
