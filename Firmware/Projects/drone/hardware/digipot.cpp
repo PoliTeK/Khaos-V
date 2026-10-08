@@ -35,7 +35,7 @@ namespace digipot {
     }
 
     I2CHandle::Result set_value(I2CHandle &i2c, Wiper wiper, uint16_t value) {
-        uint8_t wiper_addr = static_cast<uint8_t>(wiper);
+        auto wiper_addr = static_cast<uint8_t>(wiper);
 
         uint8_t data[2];
         // Command: Write data. Four MSBs address the wiper.
