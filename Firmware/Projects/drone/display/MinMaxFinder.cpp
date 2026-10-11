@@ -1,5 +1,5 @@
-#include "daisy_seed.h"
-#include "daisysp.h"
+#include <daisysp.h>
+#include <daisy_seed.h>
 #include "Display.hpp"
 #include "../math/models.hpp"
 
@@ -20,7 +20,7 @@ math::vec3f states[NUM_MODELS];
 daisy::TimerHandle timer;
 
 // Call from prototype.cpp/main() if needed
-int main(void)
+int runMinMaxFinder()
 {
     float max[6] = {-10.0, // Right x bound
         10.0, // Left x bound

@@ -16,7 +16,7 @@ math::vec3f states[NUM_MODELS];
 daisy::TimerHandle timer;
 
 // Call from prototype.cpp/main() if needed
-int main(void)
+int runDisplayTester()
 {
     char coords[2][12];
 
@@ -25,7 +25,7 @@ int main(void)
 
     display.InitDisplay();
 
-    display.setCurrentModel(Displayed_Models::ROSSLER); // Change this variable for model selection in the list
+    display.setCurrentModel(DisplayedModels::ROSSLER); // Change this variable for model selection in the list
     
     dcblock.Init(1);
     
@@ -50,8 +50,8 @@ int main(void)
             display.DrawPoint(state);
         }
 
-        sprintf(coords[0], FLT_FMT(3), FLT_VAR(3,state.x()));
-        sprintf(coords[1], FLT_FMT(3), FLT_VAR(3,state.y()));
+        (void) sprintf(coords[0], FLT_FMT(3), FLT_VAR(3,state.x()));
+        (void) sprintf(coords[1], FLT_FMT(3), FLT_VAR(3,state.y()));
 
         display.UpdateDisplay();
 

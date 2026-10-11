@@ -1,5 +1,7 @@
 #include "Display.hpp"
 
+using namespace daisy;
+
 void SSD130X::InitDisplay(){
     SSD130xI2CTransport::Config display_transport_config;
     
@@ -54,16 +56,16 @@ void SSD130X::InitDisplay(){
     lorentz_b.zr = 10.0;
     lorentz_b.zl = -10.0;
 
-    borders[static_cast<int>(Displayed_Models::CHUA)] = chua_b;
-    borders[static_cast<int>(Displayed_Models::SPROTT)] = sprott_b;
-    borders[static_cast<int>(Displayed_Models::ROSSLER)] = rossler_b;
-    borders[static_cast<int>(Displayed_Models::HALVORSEN)] = halvorsen_b;
-    borders[static_cast<int>(Displayed_Models::LORENTZ)] = lorentz_b;
+    borders[static_cast<int>(DisplayedModels::CHUA)] = chua_b;
+    borders[static_cast<int>(DisplayedModels::SPROTT)] = sprott_b;
+    borders[static_cast<int>(DisplayedModels::ROSSLER)] = rossler_b;
+    borders[static_cast<int>(DisplayedModels::HALVORSEN)] = halvorsen_b;
+    borders[static_cast<int>(DisplayedModels::LORENTZ)] = lorentz_b;
 
     ClearDisplay();
 }
 
-void SSD130X::setCurrentModel(Displayed_Models md){
+void SSD130X::setCurrentModel(DisplayedModels md){
     model_number = md;
 }
 
@@ -90,8 +92,8 @@ void SSD130X::DrawPoint(math::vec3f state){
     model_borders_t current_border = borders[static_cast<int>(model_number)];
 
     // from floating point value to a value between 0 and 63, representing the coordinates of the screen
-    x = (state.x() - current_border.xl) / (current_border.xr - current_border.xl) * 63;
-    y = (state.y() - current_border.yl) / (current_border.yr - current_border.yl) * 63;
+    x = static_cast<uint8_t>((state.x() - current_border.xl) / (current_border.xr - current_border.xl) * 63);
+    y = static_cast<uint8_t>((state.y() - current_border.yl) / (current_border.yr - current_border.yl) * 63);
 
     display.DrawPixel(63+x, y, true);
 }
