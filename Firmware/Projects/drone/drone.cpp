@@ -15,12 +15,16 @@
 #include "math/chaos_osc.hpp"
 #include "math/models.hpp"
 
-#include "hardware/digipot.hpp"
-#include "hardware/i2c_utils.hpp"
+#include "menu/menu.hpp"
+
+#include "io/i2c_utils.hpp"
+#include "io/inputs.hpp"
+#include "io/outputs.hpp"
 
 #include "sync/TriBuf.hpp"
 
 using namespace daisy;
+using namespace khaos;
 
 /* --- Configuration ---------------------------------------------------------------------------- */
 constexpr bool DEBUG = true;
@@ -41,30 +45,7 @@ constexpr uint32_t OUTPUT_SAMPLE_RATE = 1000; // per second
 /// Refresh rate of the screen.
 constexpr uint32_t DISPLAY_REFRESH_RATE = 30; // per second
 
-/// @brief Sets how many 'ticks' cover the full range.
-/// Controls the resolution for encoder-controlled parameters.
-constexpr uint16_t ROTARY_ENCODER_RESOLUTION = 32;
-constexpr size_t PARAM_RESOLUTION = 1024;
-
 /* --- Definitions ------------------------------------------------------------------------------ */
-
-struct KhaosInputData;
-
-/**
- * Contains all hardware handles related to inputs.
- */
-struct KhaosInput {
-    std::atomic_bool pending_refresh{false};
-
-    AdcHandle adc;
-    std::array<Encoder, 4> encoders;
-
-    enum AdcChannels { ADC_CV0 = 0, ADC_CV1, ADC_NUM_CHANNELS };
-
-    /// @brief Initialize ADC channels and GPIOs
-    void init();
-    KhaosInputData refresh(const KhaosInputData &);
-};
 
 /**
  * Contains all hardware handles related to outputs.
@@ -77,25 +58,6 @@ struct KhaosOutput {
     void init();
 };
 
-/**
- * Input data coming from external hardware.
- * This must be synchronized across interrupts and processed in order to be
- * used to control chaotic models and other outputs.
- */
-struct KhaosInputData {
-    std::array<uint16_t, 4> encoder_values;
-
-    /// Counters for how many times each switch was pressed.
-    /// Using a counter is needed to avoid losing updates accidentally.
-    std::array<uint32_t, 4> switches{0};
-
-    /// Control Voltages
-    std::array<uint16_t, 2> cvs{0};
-
-    /// @brief Initialize input data with default values
-    KhaosInputData();
-};
-
 // TODO: choose models
 // TODO: choose a more appropriate name
 struct KhaosModelData {
@@ -103,7 +65,7 @@ struct KhaosModelData {
     math::Rossler rossler;
     math::Halvorsen halvorsen;
 
-    decltype(KhaosInputData::switches) switches;
+    decltype(khaos::io::RawInputData::switches) switches;
 
     /// @brief Initialize chaotic models with default parameters
     KhaosModelData() = default;
@@ -127,7 +89,10 @@ TimerHandle input_timer;
 /// TIM4: 16-bit timer
 TimerHandle display_timer;
 
-static KhaosInput input;
+daisy::UI ui_handle;
+daisy::UiEventQueue ui_event_queue;
+
+static io::InputHandles input{ui_event_queue};
 static KhaosOutput output;
 
 static TriBuf<KhaosModelData> model_data_sync;
@@ -156,7 +121,7 @@ int main() {
 
     hw.PrintLine("%s Acquired model data handles", LOG_LABEL);
 
-    input.init();
+    input.init_peripherals();
     output.init();
     init_timers();
 
@@ -164,7 +129,7 @@ int main() {
 
     I2CHandle i2c_handle;
     hw.Print("%s Init I2C Port 1: ", LOG_LABEL);
-    if (digipot::init(i2c_handle) == daisy::I2CHandle::Result::OK) {
+    if (io::init_i2c(i2c_handle) == daisy::I2CHandle::Result::OK) {
         hw.PrintLine("%s", LOG_OK);
     } else {
         hw.PrintLine("%s", LOG_ERROR);
@@ -172,7 +137,7 @@ int main() {
     }
 
     hw.Print("%s Check digipots: ", LOG_LABEL);
-    if (i2c_check_addr(i2c_handle, digipot::I2C_ADDRESS) == I2CHandle::Result::OK) {
+    if (i2c_check_addr(i2c_handle, khaos::io::I2C_DIGIPOT_ADDRESS) == I2CHandle::Result::OK) {
         hw.PrintLine("%s", LOG_OK);
     } else {
         hw.PrintLine("%s", LOG_ERROR);
@@ -180,6 +145,7 @@ int main() {
     }
 
     // TODO: init display
+    khaos::init_ui(ui_handle, ui_event_queue);
 
     // Tasks:
     // - read input
@@ -195,8 +161,10 @@ int main() {
             handle_input();
         }
 
+        // Update UI and refresh display
         if (display_pending_refresh.exchange(false, std::memory_order_acquire)) {
             // TODO: manage display stuff...
+            ui_handle.Process();
         }
 
         __WFE(); // low powah
@@ -218,63 +186,9 @@ bad_init:
     }
 }
 
-void KhaosInput::init() {
-    std::array<AdcChannelConfig, AdcChannels::ADC_NUM_CHANNELS> adc_config;
-
-    // Setup Control Voltages
-    adc_config[AdcChannels::ADC_CV0].InitSingle(seed::A0);
-    adc_config[AdcChannels::ADC_CV1].InitSingle(seed::A1);
-    adc.Init(adc_config.data(), adc_config.size());
-    adc.Start();
-
-    encoders[0].Init(seed::D17, seed::D18, seed::D24); // input 1
-    encoders[1].Init(seed::D19, seed::D20, seed::D25); // input 2
-
-    // Model selection: analog1, analog2 or digital
-    encoders[2].Init(seed::D2, seed::D3, seed::D26);
-
-    // Digital model selection
-    encoders[3].Init(seed::D13, seed::D14, seed::D27);
-}
-
-KhaosInputData KhaosInput::refresh(const KhaosInputData &prev_data) {
-    auto data = prev_data;
-
-    /* Encoders */
-    for (size_t i = 0; i < input.encoders.size(); i++) {
-        input.encoders[i].Debounce();
-        int32_t increment = input.encoders[i].Increment();
-
-        int32_t new_value =
-            static_cast<int32_t>(data.encoder_values[i]) +
-            increment * static_cast<int32_t>(PARAM_RESOLUTION / ROTARY_ENCODER_RESOLUTION);
-
-        constexpr uint16_t max_value = std::numeric_limits<uint16_t>::max();
-
-        // Clamp encoder value between 0 and (2^16 - 1)
-        if (new_value < 0) {
-            data.encoder_values[i] = 0;
-        } else if (new_value > static_cast<int32_t>(max_value)) {
-            data.encoder_values[i] = max_value;
-        } else {
-            data.encoder_values[i] = static_cast<uint16_t>(new_value);
-        }
-
-        // Gather switch data (switch is set on falling edge)
-        // Increment on falling edge
-        data.switches[i] += input.encoders[i].FallingEdge() ? 1 : 0;
-    }
-
-    /* Control Voltages */
-    data.cvs[0] = input.adc.Get(KhaosInput::ADC_CV0);
-    data.cvs[1] = input.adc.Get(KhaosInput::ADC_CV1);
-
-    return data;
-}
-
 void handle_input() {
     // Needed to maintain a persistent state, even if the reader loses some updates
-    static KhaosInputData input_data;
+    static io::RawInputData input_data;
 
     input_data = input.refresh(input_data);    
 
@@ -284,7 +198,7 @@ void handle_input() {
 
     for (size_t i = 0; i < params.size(); i++) {
         // sum CV and encoder value
-        int32_t raw_value = static_cast<int32_t>(input_data.cvs[i]) + static_cast<int32_t>(input_data.encoder_values[i]);
+        int32_t raw_value = static_cast<int32_t>(input_data.cvs[i]) + static_cast<int32_t>(input_data.encoder_increments[i]);
         constexpr uint16_t max_value = std::numeric_limits<uint16_t>::max();
 
         // clamp to 16 bit unsigned int
@@ -322,13 +236,6 @@ void KhaosOutput::init() {
 
     led_config.pin = seed::D6;
     leds[2].Init(led_config);
-}
-
-KhaosInputData::KhaosInputData() {
-    // Initialize each encoder value at half range
-    for (auto &encoder_value : encoder_values) {
-        encoder_value = PARAM_RESOLUTION / 2;
-    }
 }
 
 void init_timers() {

@@ -2,22 +2,6 @@
 
 namespace digipot {
     using namespace daisy;
-
-    I2CHandle::Result init(I2CHandle &i2c) {
-        I2CHandle::Config i2c_config;
-
-        // choose which Daisy peripheral to use
-        i2c_config.periph = I2C_PERIPHERAL;
-        i2c_config.speed = I2CHandle::Config::Speed::I2C_100KHZ;
-        i2c_config.mode = I2CHandle::Config::Mode::I2C_MASTER;
-
-        // configure the I2C pins
-        i2c_config.pin_config.scl = I2C_SCL;
-        i2c_config.pin_config.sda = I2C_SDA;
-
-        return i2c.Init(i2c_config);
-    }
-
     uint8_t get_TCON_address(Wiper wiper) {
         switch (wiper)
         {
@@ -34,7 +18,7 @@ namespace digipot {
         }
     }
 
-    I2CHandle::Result set_value(I2CHandle &i2c, Wiper wiper, uint16_t value) {
+    I2CHandle::Result set_value(I2CHandle &i2c, uint16_t address, Wiper wiper, uint16_t value, uint32_t timeout_ms) {
         auto wiper_addr = static_cast<uint8_t>(wiper);
 
         uint8_t data[2];
@@ -44,6 +28,6 @@ namespace digipot {
         data[1] = value & 0xFF; // D7:0
 
         // Timeout in milliseconds
-        return i2c.TransmitBlocking(I2C_ADDRESS, data, sizeof(data)/sizeof(*data), I2C_TIMEOUT_MS);
+        return i2c.TransmitBlocking(address, data, sizeof(data)/sizeof(*data), timeout_ms);
     }
 }
