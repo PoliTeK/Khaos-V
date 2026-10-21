@@ -16,34 +16,26 @@ namespace khaos::io {
     // conversion
     enum InputId : std::uint8_t {
         // TODO: rename encoder ids for clarity
-        Encoder0,
-        Encoder1,
+        ModelSelection,
+        DigitalScale,
         Encoder2,
         Encoder3,
     };
 
     constexpr inline std::array<std::uint16_t, 4> ENCODER_IDS {
-        Encoder0, Encoder1,
+        ModelSelection, DigitalScale,
         Encoder2, Encoder3
     };
     
     /**
-     *  @brief Cumulative input data.
-     *
-     *  Input data coming from external hardware.
-     *  This must be synchronized across interrupts and processed in order to
-     *  to used to control chaotic models and other outputs.
-     *
-     *  The events are accumulated so that the number of times each
-     *  event happens can be calculated from the difference between
-     *  the current and the previous input data.
+     *  @brief Bundle of input data coming from external hardware.
      */
     struct RawInputData {
         std::array<int32_t, 4> encoder_increments;
 
         /// Counters for how many times each switch was pressed.
         /// Using a counter is needed to avoid losing updates accidentally.
-        std::array<uint32_t, 4> switches{0};
+        std::array<bool, 4> switch_states{false};
 
         /// Control Voltages
         std::array<uint16_t, 2> cvs{0};
@@ -65,9 +57,11 @@ namespace khaos::io {
         /// Initializes the struct without initializing the peripherals.
         InputHandles(daisy::UiEventQueue&);
 
-        /// @brief Initialize ADC channels and GPIOs
+        /// @brief Initialize ADC channels and GPIOs.
         void init_peripherals();
-        RawInputData refresh(const RawInputData&);
+
+        /// Reads inputs and pushes events to the event queue.
+        RawInputData read_inputs();
     };
 
 }

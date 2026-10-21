@@ -27,8 +27,8 @@ void InputHandles::init_peripherals() {
     encoders[3].Init(seed::D13, seed::D14, seed::D27);
 }
 
-RawInputData InputHandles::refresh(const RawInputData &prev_data) {
-    auto data = prev_data;
+RawInputData InputHandles::read_inputs() {
+    RawInputData data;
 
     /* Encoders */
     for (size_t i = 0; i < encoders.size(); i++) {
@@ -50,7 +50,7 @@ RawInputData InputHandles::refresh(const RawInputData &prev_data) {
             event_queue.AddEncoderActivityChanged(ENCODER_IDS[i], true);
         }
         else if (encoders[i].FallingEdge()) {
-            data.switches[i] += encoders[i].FallingEdge() ? 1 : 0;
+            data.switch_states[i] = encoders[i].FallingEdge();
             event_queue.AddEncoderActivityChanged(ENCODER_IDS[i], false);
         }
     }

@@ -1,5 +1,4 @@
-# Project Name
-TARGET := drone
+TARGET := main
 
 # Define CPP_SOURCES as the list of all .cpp files in the current directory and
 # its subdirectories

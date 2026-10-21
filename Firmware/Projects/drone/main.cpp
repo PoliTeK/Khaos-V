@@ -8,8 +8,8 @@
 #include <daisy_seed.h>
 
 #include <array>
-#include <limits>
 
+#include "khaos_defs.hpp"
 #include "math/vecmath.hpp"
 // Chaotic models
 #include "math/chaos_osc.hpp"
@@ -21,8 +21,6 @@
 #include "io/inputs.hpp"
 #include "io/outputs.hpp"
 
-#include "sync/TriBuf.hpp"
-
 using namespace daisy;
 using namespace khaos;
 
@@ -32,10 +30,10 @@ constexpr const char *LOG_LABEL = "[Khaos-V]";
 constexpr const char *LOG_ERROR = "Error";
 constexpr const char *LOG_OK    = "Success";
 
-constexpr uint32_t INPUT_SAMPLE_RATE = 1; // per second
+constexpr uint32_t INPUT_SAMPLE_RATE = 20; // per second
 
 /// Number of samples stored in the output buffer.
-constexpr size_t OUTPUT_BUFFER_SIZE = 32;
+constexpr size_t OUTPUT_BUFFER_SIZE = 64;
 /// DAC output target sample rate.
 constexpr uint32_t OUTPUT_SAMPLE_RATE = 1000; // per second
 
@@ -55,20 +53,7 @@ struct KhaosOutput {
     std::array<GPIO, 3> leds;
 
     /// @brief Initialize DAC channels
-    void init();
-};
-
-// TODO: choose models
-// TODO: choose a more appropriate name
-struct KhaosModelData {
-    enum SelectedModel { ROSSLER = 0, NUM_MODELS } selected;
-    math::Rossler rossler;
-    math::Halvorsen halvorsen;
-
-    decltype(khaos::io::RawInputData::switches) switches;
-
-    /// @brief Initialize chaotic models with default parameters
-    KhaosModelData() = default;
+    void init_peripherals();
 };
 
 /// @brief Initializes timers
@@ -77,10 +62,6 @@ void init_timers();
 void input_timer_callback(void *data);
 void output_dma_callback(uint16_t **out, size_t size);
 void display_refresh_callback(void *data);
-
-/// Reads new input and processes it.
-/// It must be called exclusively by main(), and thus it has access to its resources.
-void handle_input();
 
 /* --- Global variables ------------------------------------------------------------------------- */
 
@@ -95,9 +76,11 @@ daisy::UiEventQueue ui_event_queue;
 static io::InputHandles input{ui_event_queue};
 static KhaosOutput output;
 
-static TriBuf<KhaosModelData> model_data_sync;
-static TriBuf<KhaosModelData>::Writer model_data_writer; // owner: main
-static TriBuf<KhaosModelData>::Reader model_data_reader; // owner: output_dma_callback
+static ModelData model_data;
+
+// static TriBuf<DigitalModelData> model_data_sync;
+// static TriBuf<DigitalModelData>::Writer model_data_writer; // owner: main
+// static TriBuf<DigitalModelData>::Reader model_data_reader; // owner: output_dma_callback
 
 static std::array<std::array<uint16_t, OUTPUT_BUFFER_SIZE>, 2> output_buf;
 
@@ -116,13 +99,13 @@ int main() {
     // no one has access to these yet.
     // We must ensure that at most one "process" (i.e. main / interrupt callback)
     // has access to each of them at any time.
-    model_data_writer = model_data_sync.get_writer();
-    model_data_reader = model_data_sync.get_reader();
+    // model_data_writer = model_data_sync.get_writer();
+    // model_data_reader = model_data_sync.get_reader();
 
     hw.PrintLine("%s Acquired model data handles", LOG_LABEL);
 
     input.init_peripherals();
-    output.init();
+    output.init_peripherals();
     init_timers();
 
     hw.PrintLine("%s Successfully initialized peripherals", LOG_LABEL);
@@ -145,7 +128,7 @@ int main() {
     }
 
     // TODO: init display
-    khaos::init_ui(ui_handle, ui_event_queue);
+    khaos::init_ui(ui_handle, ui_event_queue, model_data);
 
     // Tasks:
     // - read input
@@ -158,7 +141,8 @@ int main() {
     while (true) {
         // Process input data if new data is available
         if (input.pending_refresh.exchange(false, std::memory_order_acquire)) {
-            handle_input();
+            // TODO: use inputs
+            // auto input_data = input.read_inputs();
         }
 
         // Update UI and refresh display
@@ -186,37 +170,17 @@ bad_init:
     }
 }
 
-void handle_input() {
-    // Needed to maintain a persistent state, even if the reader loses some updates
-    static io::RawInputData input_data;
-
-    input_data = input.refresh(input_data);    
-
-    auto& model_data = model_data_writer.data();
-
-    std::array<uint16_t, 2> params;
-
-    for (size_t i = 0; i < params.size(); i++) {
-        // sum CV and encoder value
-        int32_t raw_value = static_cast<int32_t>(input_data.cvs[i]) + static_cast<int32_t>(input_data.encoder_increments[i]);
-        constexpr uint16_t max_value = std::numeric_limits<uint16_t>::max();
-
-        // clamp to 16 bit unsigned int
-        params[i] = static_cast<uint16_t>(math::clamp<int32_t>(raw_value, 0, max_value));
-    }
-
-    model_data.switches = input_data.switches;
-
-    // TODO: map params to model-specific (float) parameters
-    // m_data.remap_params(...);
-    model_data_writer.swap();
-}
-
-void KhaosOutput::init() {
+/**
+ *  Inits all the output peripherals.
+ *  The DAC uses the TIM6 timer, which doesn't clash with the
+ *  other timers we use.
+ */
+void KhaosOutput::init_peripherals() {
     // DAC configuration
     DacHandle::Config dac_config;
     dac_config.chn = DacHandle::Channel::BOTH;
-    dac_config.buff_state = DacHandle::BufferState::DISABLED;
+    // TODO: set correct driver strength
+    dac_config.buff_state = DacHandle::BufferState::DISABLED; /* driver strength */
     dac_config.bitdepth = DacHandle::BitDepth::BITS_12;
     dac_config.mode = DacHandle::Mode::DMA;
     dac_config.target_samplerate = OUTPUT_SAMPLE_RATE;
@@ -241,13 +205,28 @@ void KhaosOutput::init() {
 void init_timers() {
     TimerHandle::Config config;
 
+    /*
+        Calculations:
+        - 16 bit timer => counts up to 2^16 - 1 = 65'536
+        - Timer base frequency: 200kHz
+          this would overflow multiple times in one second
+        - With 3999 prescaler, the frequency becomes 200kHz / (1 + 3999) = 50kHz
+          So, in one second, the counter goes up by 50'000, safely below the overflow limit
+        - INPUT_SAMPLE_RATE might be about 50Hz (we will tune it)
+          With this value, the period becomes 50kHz / 50Hz = 10'000 counts
+        - DISPLAY_REFRESH_RATE might be 30Hz or even lower, but still greater than 1
+          Because of this, the display timer won't overflow either.
+
+        The timer will reset the counter after this value.
+    */
+
     /* Input management timer */
     config.dir = TimerHandle::Config::CounterDir::UP;
     config.enable_irq = true; // needed for user callback
     config.periph = TimerHandle::Config::Peripheral::TIM_3;
     input_timer.Init(config);
     input_timer.SetCallback(input_timer_callback);
-    input_timer.SetPrescaler(3999); // avoids overflow since the timer is 16-bit
+    input_timer.SetPrescaler(3999);
     input_timer.SetPeriod(input_timer.GetFreq() / INPUT_SAMPLE_RATE);
     input_timer.Start();
 
@@ -273,23 +252,22 @@ void output_dma_callback(uint16_t **out, size_t size) {
     // TODO: other models...
 
     // Use new data to change model parameters
-    if (model_data_reader.try_swap()) {
-        auto &data = model_data_reader.data();
+    // if (model_data_reader.try_swap()) {
+    //     auto &data = model_data_reader.data();
 
-        rossler.set_model(data.rossler);
-    }
+    //     rossler.set_model(data.rossler);
+    // }
 
     // Generate output samples
     // TODO: remap model values; choose which model; etc...
     for (size_t i = 0; i < size; i++) {
         math::vec3f state = rossler.step();
 
-        out[0][i] = state.x();
-        out[1][i] = state.y();
+        out[0][i] = static_cast<uint16_t>(state.x());
+        out[1][i] = static_cast<uint16_t>(state.y());
     }
 }
 
 void display_refresh_callback(void *data) {
-    // TODO: ...
     display_pending_refresh.store(true, std::memory_order_release);
 }
