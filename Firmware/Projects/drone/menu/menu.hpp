@@ -1,10 +1,12 @@
 #pragma once
 
+#include <array>
+
 #include <daisy.h>
 #include "../khaos_defs.hpp"
 
 namespace khaos {
-    constexpr uint32_t MODEL_LIST_POPUP_DURATION_MS = 5000;
+    // constexpr uint32_t MODEL_LIST_POPUP_DURATION_MS = 5000;
 
     enum class ModelType : uint8_t {
         Analog1 = 0, // A1
@@ -13,14 +15,14 @@ namespace khaos {
         NUM_MODEL_TYPES
     };
 
-    /// Initializes the UI and provides it with a reference to the
-    /// model parameters.
+    /// Initializes the UI and provides it with a reference to the model parameters.
     void init_ui(daisy::UI &ui, daisy::UiEventQueue &queue, ModelData& data);
 
     class ModelListMenu : public daisy::AbstractMenu {
         private:
+            static constexpr size_t ITEM_COUNT = 1;
             // TODO: turn into hard-coded array containing all the relevant stuff
-            daisy::AbstractMenu::ItemConfig menu_item;
+            std::array<daisy::AbstractMenu::ItemConfig, ITEM_COUNT> menu_items;
 
             // TODO: the menu should be organized like this:
             // daisy::AbstractMenu::Orientation::upDownSelectLeftRightModify
@@ -33,6 +35,18 @@ namespace khaos {
 
             /// Draws the menu.
             void Draw(const daisy::UiCanvasDescriptor& canvas) override;
+    };
+
+    class OptionsMenu : public daisy::AbstractMenu {
+        private:
+            static constexpr size_t ITEM_COUNT = 1;
+            
+            std::array<daisy::AbstractMenu::ItemConfig, ITEM_COUNT> menu_items;
+        public:
+            /// Default initialization for the model list menu.
+            OptionsMenu();
+
+            // void Draw(const daisy::UiCanvasDescriptor& canvas) override;
     };
 
     /**
@@ -52,6 +66,8 @@ namespace khaos {
         // TODO: create leaf pages
         ModelListMenu model_list_menu;
         // daisy::UiPage *model_list_page, *options_page;
+
+        ModelType selected_model_type;
 
         /**
          *  The digital model that is currenly being executed.

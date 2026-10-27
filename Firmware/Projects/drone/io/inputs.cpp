@@ -5,7 +5,7 @@ using namespace khaos::io;
 using namespace daisy;
 
 
-InputHandles::InputHandles(daisy::UiEventQueue& queue)
+InputHandles::InputHandles(UiEventQueue& queue)
     : event_queue(queue) {}
 
 void InputHandles::init_peripherals() {

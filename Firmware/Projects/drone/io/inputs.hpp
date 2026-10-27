@@ -11,9 +11,6 @@ namespace khaos::io {
     /// Does not necessarily match the number of ticks per full turn.
     constexpr uint16_t ROTARY_ENCODER_RANGE_TICKS = 32;
 
-    // Use this nested structure to place the enum variants under a
-    // namespace like `enum class` without giving up the implicit
-    // conversion
     enum InputId : std::uint8_t {
         // TODO: rename encoder ids for clarity
         ModelSelection,

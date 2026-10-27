@@ -2,11 +2,12 @@
 #include "../io/inputs.hpp"
 
 using namespace daisy;
+using namespace khaos;
 
 // TODO: Initialize with proper display driver
 static UiCanvasDescriptor canvas_descriptor;
 
-void khaos::init_ui(daisy::UI &ui, UiEventQueue& queue, ModelData& data) {
+void khaos::init_ui(UI &ui, UiEventQueue& queue, ModelData& data) {
     GraphMenu graph_menu{data};
 
     UI::SpecialControlIds special_ids{};
@@ -17,24 +18,26 @@ void khaos::init_ui(daisy::UI &ui, UiEventQueue& queue, ModelData& data) {
     ui.OpenPage(graph_menu);
 }
 
-khaos::GraphMenu::GraphMenu(khaos::ModelData& data_ref)
-    : selected_digital_model(DigitalModelId::Rossler)
+GraphMenu::GraphMenu(ModelData& data_ref)
+    : selected_model_type(ModelType::Analog1)
+    , selected_digital_model(DigitalModelId::Rossler)
     , model_data(data_ref)
     {}
 
-khaos::GraphMenu::MenuState khaos::GraphMenu::get_menu_state() {
+GraphMenu::MenuState GraphMenu::get_menu_state() {
     return menu_state;
 }
 
-bool khaos::GraphMenu::OnEncoderTurned(uint16_t encoder_id, int16_t turns, uint16_t steps_per_revolution) {
+bool GraphMenu::OnEncoderTurned(uint16_t encoder_id, int16_t turns, uint16_t steps_per_revolution) {
+    // TODO: fix
     if (encoder_id == io::ModelSelection) {
-        auto current_target = static_cast<int32_t>(selected_digital_model);
+        auto current_target = static_cast<int32_t>(selected_model_type);
         auto new_target = current_target + turns;
 
         if (new_target < 0)
-            new_target = static_cast<int32_t>(DigitalModelId::NUM_DIGITAL_MODELS) - new_target;
+            new_target = static_cast<int32_t>(ModelType::NUM_MODEL_TYPES) - new_target;
 
-        selected_digital_model = static_cast<DigitalModelId>(new_target % static_cast<int32_t>(DigitalModelId::NUM_DIGITAL_MODELS));
+        selected_digital_model = static_cast<DigitalModelId>(new_target % static_cast<int32_t>(ModelType::NUM_MODEL_TYPES));
 
         return true;
     }
@@ -42,7 +45,7 @@ bool khaos::GraphMenu::OnEncoderTurned(uint16_t encoder_id, int16_t turns, uint1
     return false;
 }
 
-bool khaos::GraphMenu::OnEncoderActivityChanged(uint16_t encoder_id, bool is_currently_active) {
+bool GraphMenu::OnEncoderActivityChanged(uint16_t encoder_id, bool is_currently_active) {
     if (encoder_id == io::ModelSelection) {
         switch (menu_state) {
             case MenuState::NoMenu:
@@ -65,16 +68,19 @@ bool khaos::GraphMenu::OnEncoderActivityChanged(uint16_t encoder_id, bool is_cur
 }
 
 // TODO: implement or find driver :)
-void khaos::GraphMenu::Draw(const UiCanvasDescriptor& canvas) {}
+void GraphMenu::Draw(const UiCanvasDescriptor& canvas) {}
 
-khaos::ModelListMenu::ModelListMenu() {
-    menu_item.type = ItemType::valueItem;
-    menu_item.text = "Prova";
+ModelListMenu::ModelListMenu() {
+    MappedFloatValue v{0.0, 1.0, 0.5};
 
-    Init(&menu_item, 1, Orientation::upDownSelectLeftRightModify, false);
+    menu_items[0].type = ItemType::valueItem;
+    menu_items[0].text = "Prova";
+    menu_items[0].asMappedValueItem.valueToModify = &v;
+
+    Init(menu_items.data(), menu_items.size(), Orientation::upDownSelectLeftRightModify, false);
 }
 
-bool khaos::ModelListMenu::OnEncoderActivityChanged(uint16_t encoder_id, bool is_currently_active) {
+bool ModelListMenu::OnEncoderActivityChanged(uint16_t encoder_id, bool is_currently_active) {
     if (encoder_id == io::ModelSelection) {
         // TODO: select digital model under cursor
         // auto idx = GetSelectedItemIdx();
@@ -88,4 +94,14 @@ bool khaos::ModelListMenu::OnEncoderActivityChanged(uint16_t encoder_id, bool is
 }
 
 // TODO: implement or find driver :)
-void khaos::ModelListMenu::Draw(const UiCanvasDescriptor& canvas) {}
+void ModelListMenu::Draw(const UiCanvasDescriptor& canvas) {}
+
+OptionsMenu::OptionsMenu() {
+    menu_items[0].type = ItemType::valueItem;
+    menu_items[0].text = "Prova Opzioni";
+
+    Init(menu_items.data(), menu_items.size(), Orientation::upDownSelectLeftRightModify, false);
+}
+
+// TODO: implement or find driver :)
+// void OptionsMenu::Draw(const UiCanvasDescriptor& canvas) {}
