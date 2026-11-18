@@ -6,20 +6,24 @@
 
 #include <atomic>
 #include <daisy_seed.h>
+#include <dev/oled_ssd130x.h>
 
 #include <array>
 
 #include "khaos_defs.hpp"
+
+#include "display/display.hpp"
+
+#include "io/i2c_utils.hpp"
+#include "io/inputs.hpp"
+#include "io/outputs.hpp"
+
 #include "math/vecmath.hpp"
 // Chaotic models
 #include "math/chaos_osc.hpp"
 #include "math/models.hpp"
 
 #include "menu/menu.hpp"
-
-#include "io/i2c_utils.hpp"
-#include "io/inputs.hpp"
-#include "io/outputs.hpp"
 
 using namespace daisy;
 using namespace khaos;
@@ -90,6 +94,7 @@ static std::atomic_bool display_pending_refresh{false};
 
 int main() {
     DaisySeed hw;
+    display::DisplayDriver display;
 
     hw.Init();
     hw.StartLog(DEBUG);
@@ -108,7 +113,7 @@ int main() {
     output.init_peripherals();
     init_timers();
 
-    hw.PrintLine("%s Successfully initialized peripherals", LOG_LABEL);
+    hw.PrintLine("%s Successfully initialized I/O peripherals", LOG_LABEL);
 
     I2CHandle i2c_handle;
     hw.Print("%s Init I2C Port 1: ", LOG_LABEL);
@@ -127,8 +132,11 @@ int main() {
         goto bad_init;
     }
 
-    // TODO: init display
+    display::init(display);
+    hw.PrintLine("%s Display initialized successfully", LOG_LABEL);
+
     khaos::init_ui(ui_handle, ui_event_queue, model_data);
+
 
     // Tasks:
     // - read input
@@ -172,8 +180,7 @@ bad_init:
 
 /**
  *  Inits all the output peripherals.
- *  The DAC uses the TIM6 timer, which doesn't clash with the
- *  other timers we use.
+ *  The DAC uses the TIM6 timer, which doesn't clash with the other timers we use.
  */
 void KhaosOutput::init_peripherals() {
     // DAC configuration

@@ -8,28 +8,34 @@
 namespace khaos {
     // constexpr uint32_t MODEL_LIST_POPUP_DURATION_MS = 5000;
 
-    enum class ModelType : uint8_t {
-        Analog1 = 0, // A1
-        Analog2, // A2
-        Digital, // D
-        NUM_MODEL_TYPES
-    };
-
     /// Initializes the UI and provides it with a reference to the model parameters.
-    void init_ui(daisy::UI &ui, daisy::UiEventQueue &queue, ModelData& data);
+    bool init_ui(daisy::UI &ui, daisy::UiEventQueue &queue, ModelData& data);
 
     class ModelListMenu : public daisy::AbstractMenu {
         private:
-            static constexpr size_t ITEM_COUNT = 1;
-            // TODO: turn into hard-coded array containing all the relevant stuff
-            std::array<daisy::AbstractMenu::ItemConfig, ITEM_COUNT> menu_items;
-
             // TODO: the menu should be organized like this:
             // daisy::AbstractMenu::Orientation::upDownSelectLeftRightModify
 
         public:
             /// Default initialization for the model list menu.
             ModelListMenu();
+
+            bool OnEncoderActivityChanged(uint16_t encoder_id, bool is_currently_active) override;
+
+            /// Draws the menu.
+            void Draw(const daisy::UiCanvasDescriptor& canvas) override;
+    };
+
+    class ParametersMenu : public daisy::AbstractMenu {
+        private:
+            ModelData *model_data;
+
+            friend decltype(init_ui) init_ui;
+
+        public:
+            ParametersMenu(ModelData*);
+
+            void OnShow() override;
 
             bool OnEncoderActivityChanged(uint16_t encoder_id, bool is_currently_active) override;
 
@@ -46,7 +52,7 @@ namespace khaos {
             /// Default initialization for the model list menu.
             OptionsMenu();
 
-            // void Draw(const daisy::UiCanvasDescriptor& canvas) override;
+            void Draw(const daisy::UiCanvasDescriptor& canvas) override;
     };
 
     /**
@@ -61,24 +67,19 @@ namespace khaos {
      *  and relevant data associated with it;
      *  other menus are displayed on top of this page.
      */
-    class GraphMenu : public daisy::UiPage {
+    class GraphPage : public daisy::UiPage {
     private:
         // TODO: create leaf pages
-        ModelListMenu model_list_menu;
+        ModelListMenu *model_list_menu;
+        // OptionListMenu option_list_menu;
+        
         // daisy::UiPage *model_list_page, *options_page;
-
-        ModelType selected_model_type;
-
-        /**
-         *  The digital model that is currenly being executed.
-         */
-        DigitalModelId selected_digital_model;
 
         /**
          *  Information about both running and suspended models,
          *  shared with other components.
          */
-        ModelData& model_data;
+        ModelData *model_data;
 
         enum class MenuState : uint8_t {
             NoMenu, // display chaotic model
@@ -86,12 +87,13 @@ namespace khaos {
             ShowingOptions,
         } menu_state;
 
+        friend decltype(init_ui) init_ui;
+
     public:
-        GraphMenu(ModelData&);
+        GraphPage(ModelData*, ModelListMenu*);
 
         MenuState get_menu_state();
 
-        bool OnEncoderTurned(uint16_t encoder_id, int16_t turns, uint16_t steps_per_revolution) override;
         bool OnEncoderActivityChanged(uint16_t encoder_id, bool is_currently_active) override;
 
         void Draw(const daisy::UiCanvasDescriptor& canvas) override;

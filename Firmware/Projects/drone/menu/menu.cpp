@@ -1,5 +1,6 @@
 #include "menu.hpp"
 #include "../io/inputs.hpp"
+#include "../display/display.hpp"
 
 using namespace daisy;
 using namespace khaos;
@@ -7,75 +8,93 @@ using namespace khaos;
 // TODO: Initialize with proper display driver
 static UiCanvasDescriptor canvas_descriptor;
 
-void khaos::init_ui(UI &ui, UiEventQueue& queue, ModelData& data) {
-    GraphMenu graph_menu{data};
+static GraphPage graph_page{nullptr, nullptr};
+static ModelListMenu model_list_menu;
+static ParametersMenu parameters_menu{nullptr};
 
-    UI::SpecialControlIds special_ids{};
+class ParamItem : public AbstractMenu::CustomItem {
+    public:
+        int max_num = 3;
+        int which = 0;
 
-    // TODO: list canvases
+        // do nothing; item drawing is handled by the menu
+        void Draw(OneBitGraphicsDisplay &display, int, int, Rectangle, bool) override {};
+        
+        [[nodiscard]] bool CanBeEnteredForEditing() const override { return true; }
 
-    ui.Init(queue, special_ids, {});
-    ui.OpenPage(graph_menu);
+        void ModifyValue(int16_t increments, uint16_t steps_per_revolution, bool is_fn_button_pressed) override {
+            (void) is_fn_button_pressed;
+            (void) steps_per_revolution;
+            which += increments;
+        }
+};
+
+static ParamItem p1, p2;
+
+
+bool khaos::init_ui(UI &ui, UiEventQueue& queue, ModelData& data) {
+    if (graph_page.model_data != nullptr) {
+        return false;
+    }
+
+    graph_page.model_data = &data;
+    graph_page.model_list_menu = &model_list_menu;
+
+    parameters_menu.model_data = &data;
+
+    // okBttnId and cancelBttnId are unused because we use the
+    // encoder swithces instead of buttons, generating
+    // EncoderActivityChanged events, which are not used by
+    // AbstractMenu directly.
+    UI::SpecialControlIds special_ids{
+        // .okBttnId = io::ModelSelection,
+        // .cancelBttnId = io::DigitalScale,
+        .menuEncoderId = io::ModelSelection,
+        .valueEncoderId = io::DigitalScale,
+    };
+
+    ui.Init(queue, special_ids, {canvas_descriptor});
+
+    ui.OpenPage(graph_page);
+    return true;
 }
 
-GraphMenu::GraphMenu(ModelData& data_ref)
-    : selected_model_type(ModelType::Analog1)
-    , selected_digital_model(DigitalModelId::Rossler)
+GraphPage::GraphPage(ModelData *data_ref, ModelListMenu *model_list_menu)
+    : model_list_menu(model_list_menu)
     , model_data(data_ref)
-    {}
+{}
 
-GraphMenu::MenuState GraphMenu::get_menu_state() {
+GraphPage::MenuState GraphPage::get_menu_state() {
     return menu_state;
 }
 
-bool GraphMenu::OnEncoderTurned(uint16_t encoder_id, int16_t turns, uint16_t steps_per_revolution) {
-    // TODO: fix
+bool GraphPage::OnEncoderActivityChanged(uint16_t encoder_id, bool is_currently_active) {
     if (encoder_id == io::ModelSelection) {
-        auto current_target = static_cast<int32_t>(selected_model_type);
-        auto new_target = current_target + turns;
-
-        if (new_target < 0)
-            new_target = static_cast<int32_t>(ModelType::NUM_MODEL_TYPES) - new_target;
-
-        selected_digital_model = static_cast<DigitalModelId>(new_target % static_cast<int32_t>(ModelType::NUM_MODEL_TYPES));
-
+        GetParentUI()->OpenPage(*this->model_list_menu);
         return true;
     }
 
-    return false;
+    return true;
 }
-
-bool GraphMenu::OnEncoderActivityChanged(uint16_t encoder_id, bool is_currently_active) {
-    if (encoder_id == io::ModelSelection) {
-        switch (menu_state) {
-            case MenuState::NoMenu:
-                menu_state = MenuState::ShowingModelList;
-                // TODO: show menu
-                // GetParentUI()->OpenPage(model_list_page);
-                break;
-            case MenuState::ShowingModelList:
-                menu_state = MenuState::NoMenu;
-                // TODO: close menu
-                // GetParentUI()->ClosePage(model_list_page);
-                break;
-            default:
-                break;
-        }
-        return true;
-    }
-
-    return false;
-}
-
-// TODO: implement or find driver :)
-void GraphMenu::Draw(const UiCanvasDescriptor& canvas) {}
 
 ModelListMenu::ModelListMenu() {
-    MappedFloatValue v{0.0, 1.0, 0.5};
+    // TODO: fare attenzione che ITEM_COUNT sia corretto...
+    constexpr size_t ITEM_COUNT = 3;
+    std::array<daisy::AbstractMenu::ItemConfig, ITEM_COUNT> menu_items;
 
-    menu_items[0].type = ItemType::valueItem;
-    menu_items[0].text = "Prova";
-    menu_items[0].asMappedValueItem.valueToModify = &v;
+    // Place your chaotic models here
+
+    menu_items[0].text = "Rossler";
+    menu_items[0].type = daisy::AbstractMenu::ItemType::openUiPageItem;
+    menu_items[0].asOpenUiPageItem.pageToOpen = &parameters_menu;
+
+    menu_items[1].text = "Halvorsen";
+    menu_items[1].type = daisy::AbstractMenu::ItemType::openUiPageItem;
+    menu_items[1].asOpenUiPageItem.pageToOpen = &parameters_menu;
+
+    menu_items[2].text = "Sprott";
+    menu_items[2].type = daisy::AbstractMenu::ItemType::openUiPageItem;
+    menu_items[2].asOpenUiPageItem.pageToOpen = &parameters_menu;
 
     Init(menu_items.data(), menu_items.size(), Orientation::upDownSelectLeftRightModify, false);
 }
@@ -86,15 +105,69 @@ bool ModelListMenu::OnEncoderActivityChanged(uint16_t encoder_id, bool is_curren
         // auto idx = GetSelectedItemIdx();
 
         if (is_currently_active) {
-            GetParentUI()->ClosePage(*this);
+            // call proper item function
+            ((AbstractMenu*) this)->OnOkayButton(1, false);
+
+            // close AFTER we opened the parameter menu, otherwise
+            // the previous call won't see the parent ui
+            Close();
+
+            return true;
+        }
+    } else if (encoder_id == io::DigitalScale) {
+        if (is_currently_active) {
+            Close();
             return true;
         }
     }
-    return false;
+
+    // don't propagate events to previous pages
+    return true;
 }
 
-// TODO: implement or find driver :)
-void ModelListMenu::Draw(const UiCanvasDescriptor& canvas) {}
+ParametersMenu::ParametersMenu(ModelData *model_data)
+    : model_data(model_data)
+{
+    constexpr size_t ITEM_COUNT = 3;
+    std::array<AbstractMenu::ItemConfig, ITEM_COUNT> menu_items;
+
+    // P1 mapping, P2 mapping: P1 -> A, P2 -> C
+    menu_items[0].text = "P1";
+    menu_items[0].type = AbstractMenu::ItemType::customItem;
+    menu_items[0].asCustomItem.itemObject = &p1;
+
+    menu_items[1].text = "P2";
+    menu_items[1].type = AbstractMenu::ItemType::customItem;
+    menu_items[1].asCustomItem.itemObject = &p2;
+    
+    menu_items[ITEM_COUNT-1].text = "Confirm";
+    menu_items[ITEM_COUNT-1].type = AbstractMenu::ItemType::closeMenuItem;
+
+    Init(menu_items.data(), menu_items.size(), Orientation::upDownSelectLeftRightModify, false);
+}
+
+void ParametersMenu::OnShow() {
+    if (model_data) {
+
+        switch(model_data->selected_digital_model) {
+            case DigitalModelId::Rossler:
+                p1.max_num = 3;
+                break;
+            case DigitalModelId::Halvorsen:
+                p1.max_num = 1;
+                break;
+            case DigitalModelId::Sprott:
+                p1.max_num = 2;
+                break;
+            default:
+                break;
+        }
+    }
+}
+
+// ----------------------------------------------------------------------
+// DRAWING
+// ---------------------------------------------------------------------
 
 OptionsMenu::OptionsMenu() {
     menu_items[0].type = ItemType::valueItem;
@@ -104,4 +177,39 @@ OptionsMenu::OptionsMenu() {
 }
 
 // TODO: implement or find driver :)
-// void OptionsMenu::Draw(const UiCanvasDescriptor& canvas) {}
+void GraphPage::Draw(const UiCanvasDescriptor& canvas) {
+    auto driver = static_cast<display::DisplayDriver*>(canvas.handle_);
+
+    // TODO: implement drawing
+    (void) driver;
+}
+
+void ModelListMenu::Draw(const UiCanvasDescriptor& canvas) {
+    auto driver = static_cast<display::DisplayDriver*>(canvas.handle_);
+
+    // TODO: implement drawing
+    (void) driver;
+}
+
+// NOTE: not used yet
+void OptionsMenu::Draw(const UiCanvasDescriptor& canvas) {
+    auto driver = static_cast<display::DisplayDriver*>(canvas.handle_);
+
+    // TODO: implement drawing
+    (void) driver;
+}
+void ParametersMenu::Draw(UiCanvasDescriptor const& canvas) {
+    auto driver = static_cast<display::DisplayDriver*>(canvas.handle_);
+
+    // TODO: implement drawing
+    (void) driver;
+
+    // for (int i = 0; i < numItems_; i++) {
+    //     // driver->DrawRect(10, 10, 50, 50, true, false);
+    // }
+    // if (p1.which == 3) {
+        // driver->WriteChar('Z', FontDef::, true);
+    // }
+};
+
+
