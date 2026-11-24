@@ -2,6 +2,11 @@
 
 using namespace daisy;
 
+enum DisplaySize{
+    Width = 128; // width of the display
+    Height = 64; // height of the display
+}
+
 void SSD130X::InitDisplay(){
     SSD130xI2CTransport::Config display_transport_config;
     
@@ -75,10 +80,10 @@ void SSD130X::ClearAll(){
 
 void SSD130X::ClearDisplay(){
     display.Fill(false);
-    display.DrawLine(63, 0, 63, 63, true);
-    display.DrawLine(127, 0, 127, 63, true);
-    display.DrawLine(63, 0, 127, 0, true);
-    display.DrawLine(63, 63, 127, 63, true);
+    display.DrawLine(Height-1, 0, Height-1, Height-1, true);
+    display.DrawLine(Width-1, 0, Width-1, Height-1, true);
+    display.DrawLine(Height-1, 0, Width-1, 0, true);
+    display.DrawLine(Height-1, Height-1, Width-1, Height-1, true);
 
     for(int i=0; i<N_MODELS; i++){
         WriteText(i, models_names[i]);
@@ -91,11 +96,11 @@ void SSD130X::DrawPoint(math::vec3f state){
     uint8_t x, y;
     model_borders_t current_border = borders[static_cast<int>(model_number)];
 
-    // from floating point value to a value between 0 and 63, representing the coordinates of the screen
-    x = static_cast<uint8_t>((state.x() - current_border.xl) / (current_border.xr - current_border.xl) * 63);
-    y = static_cast<uint8_t>((state.y() - current_border.yl) / (current_border.yr - current_border.yl) * 63);
+    // from floating point value to a value between 0 and Height-1, representing the coordinates of the screen
+    x = static_cast<uint8_t>((state.x() - current_border.xl) / (current_border.xr - current_border.xl) * Height-1);
+    y = static_cast<uint8_t>((state.y() - current_border.yl) / (current_border.yr - current_border.yl) * Height-1);
 
-    display.DrawPixel(63+x, y, true);
+    display.DrawPixel(Height-1+x, y, true);
 }
 
 void SSD130X::UpdateDisplay(){
@@ -111,5 +116,5 @@ void SSD130X::WriteText(int pos, const char* text){
 }
 
 void SSD130X::SelectText(int pos){
-    display.DrawRect(1, pos*10, 60, pos*10+9, true, false);
+    display.DrawRect(1, pos*10, 60, pos*10+9, true, false); //TODO: substitute absolute values with parameters 
 }

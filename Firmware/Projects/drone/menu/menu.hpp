@@ -11,11 +11,13 @@ namespace khaos {
     /// Initializes the UI and provides it with a reference to the model parameters.
     bool init_ui(daisy::UI &ui, daisy::UiEventQueue &queue, ModelData& data);
 
+    /// True if a menu is open over the GraphPage
+    bool menu_is_open();
+
     class ModelListMenu : public daisy::AbstractMenu {
         private:
             // TODO: the menu should be organized like this:
             // daisy::AbstractMenu::Orientation::upDownSelectLeftRightModify
-
         public:
             /// Default initialization for the model list menu.
             ModelListMenu();

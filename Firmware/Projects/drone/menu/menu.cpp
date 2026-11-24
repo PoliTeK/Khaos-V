@@ -16,7 +16,7 @@ class ParamItem : public AbstractMenu::CustomItem {
     public:
         int max_num = 3;
         int which = 0;
-
+        
         // do nothing; item drawing is handled by the menu
         void Draw(OneBitGraphicsDisplay &display, int, int, Rectangle, bool) override {};
         
@@ -59,6 +59,10 @@ bool khaos::init_ui(UI &ui, UiEventQueue& queue, ModelData& data) {
     return true;
 }
 
+bool khaos::menu_is_open() {
+    return graph_page.get_menu_state() != GraphPage::MenuState::NoMenu;
+}
+
 GraphPage::GraphPage(ModelData *data_ref, ModelListMenu *model_list_menu)
     : model_list_menu(model_list_menu)
     , model_data(data_ref)
@@ -69,7 +73,7 @@ GraphPage::MenuState GraphPage::get_menu_state() {
 }
 
 bool GraphPage::OnEncoderActivityChanged(uint16_t encoder_id, bool is_currently_active) {
-    if (encoder_id == io::ModelSelection) {
+    if (encoder_id == io::ModelSelection && is_currently_active) {
         GetParentUI()->OpenPage(*this->model_list_menu);
         return true;
     }
@@ -105,6 +109,24 @@ bool ModelListMenu::OnEncoderActivityChanged(uint16_t encoder_id, bool is_curren
         // auto idx = GetSelectedItemIdx();
 
         if (is_currently_active) {
+            if (model_data) {
+                model_data->selected_model_type = ModelType::Digital;
+                switch (GetSelectedItemIdx()) {
+                    case 0: {
+                        model_data->selected_digital_model = DigitalModelId::Rossler; 
+                        break;
+                    }
+                    case 1: {
+                        model_data->selected_digital_model = DigitalModelId::Halvorsen; 
+                        break;
+                    }
+                    case 2: {
+                        model_data->selected_digital_model = DigitalModelId::Sprott; 
+                        break;
+                    }
+                    default: break;
+                }
+            }
             // call proper item function
             ((AbstractMenu*) this)->OnOkayButton(1, false);
 

@@ -56,10 +56,8 @@ RawInputData InputHandles::read_inputs() {
     }
 
     /* Control Voltages */
-    data.cvs[0] = adc.Get(ADC_CV0);
-    data.cvs[1] = adc.Get(ADC_CV1);
+    data.cvs[0] = adc.GetValue(ADC_CV0); // GetValue() restituisce uint16
+    data.cvs[1] = adc.GetValue(ADC_CV1); // mentre Get() restituiva un valore float normalizzato tra 0 e 1
 
     return data;
 }
-
-

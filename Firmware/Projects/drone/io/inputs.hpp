@@ -13,15 +13,15 @@ namespace khaos::io {
 
     enum InputId : std::uint8_t {
         // TODO: rename encoder ids for clarity
+        Parameter1,
+        Parameter2,
         ModelSelection,
-        DigitalScale,
-        Encoder2,
-        Encoder3,
+        DigitalScale
     };
 
     constexpr inline std::array<std::uint16_t, 4> ENCODER_IDS {
-        ModelSelection, DigitalScale,
-        Encoder2, Encoder3
+        Parameter1, Parameter2,
+        ModelSelection, DigitalScale
     };
     
     /**
@@ -59,6 +59,7 @@ namespace khaos::io {
 
         /// Reads inputs and pushes events to the event queue.
         RawInputData read_inputs();
+        
     };
 
 }
