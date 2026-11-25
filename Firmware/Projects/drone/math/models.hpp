@@ -83,20 +83,6 @@ template <class T> class ContinuousModel {
     }
 };
 
-template <class M> class DiscretizedModel : public DiscreteModel<typename M::StateType> {
-  public:
-    using StateType = typename M::StateType;
-    using Time = typename M::StateType::Base;
-
-    M model;
-    Time dt;
-
-    DiscretizedModel(const M &model, Time dt) : model(model), dt(dt) {}
-
-    // Calls the underlying continuous model with a certain dt
-    StateType step(StateType state) const override { return model.step(state, dt); }
-};
-
 // -- Discrete oscillators --
 
 /**
